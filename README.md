@@ -1,2 +1,2 @@
-# Napoleon-Application-Interface
-Allow Napoleon to connect to the internet and to Spotify
+# Napoleon
+An all-in-one local AI
