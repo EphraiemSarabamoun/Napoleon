@@ -1,3 +1,4 @@
+
 import os
 import json
 import subprocess
@@ -6,11 +7,13 @@ import torch.nn.functional as F
 import hashlib
 import numpy as np
 import re
+from flask import Flask, request, jsonify, send_from_directory
 
 # Global variable for the model name (you can change this as needed)
 MODEL_NAME = "deepseek-r1:32b"
 BOT_NAME = "Napoleon"
 
+app = Flask(__name__, static_folder='static')
 
 def simple_text_embedding(text, dim=256):
     """
@@ -233,70 +236,70 @@ def generate_response(prompt):
     return clean_response(response)
 
 
-def main():
-    memory_file = "memories/dnc_memory.pt"
-    embedding_dim = 256  # Dimensionality for embeddings.
-    memory_size = 10     # Number of memory slots.
+# Initialize the memory module
+memory_file = "memories/dnc_memory.pt"
+embedding_dim = 256
+memory_size = 10
+memory_module = PersistentDeepSeekMemory(memory_file, memory_size, embedding_dim)
 
-    memory_module = PersistentDeepSeekMemory(
-        memory_file, memory_size, embedding_dim)
-    print("\nWelcome to the AI terminal using DeepSeek. Type 'exit' to quit.")
+# Store user name
+global stored_name
+stored_name = None
 
-    # Retrieve the user's name from memory (most recent non-bot name)
-    stored_name = get_user_name_from_entries(
-        memory_module.entries, bot_name=BOT_NAME)
-
-    # If no name is stored, prompt the user.
-    if not stored_name:
-        initial_message = "My name is " + BOT_NAME + ". What's your name?"
-        print("\nBot:", initial_message)
-        memory_module.write(initial_message)
-        user_input = input("\nYou: ").strip()
-        # Process the input to extract only the name.
-        extracted_name = extract_user_name(user_input)
-        if not extracted_name:
-            extracted_name = user_input  # fallback if regex doesn't match
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    global stored_name
+    
+    data = request.json
+    user_input = data.get('message', '')
+    
+    if not user_input:
+        return jsonify({'error': 'No message provided'}), 400
+    
+    # Write the user's input into memory
+    slot = memory_module.write(user_input)
+    
+    # Extract name if present
+    extracted_name = extract_user_name(user_input)
+    if extracted_name:
         stored_name = extracted_name
-        memory_module.write("My name is " + stored_name)
-        print(f"[Memory updated with your name: {stored_name}]")
-        print("\nBot: Nice to meet you, " + stored_name + "!")
-        memory_module.save_memory()
-
-    while True:
-        user_input = input("\nYou: ").strip()
-        if user_input.lower() in ["exit", "quit"]:
-            print("Exiting. Goodbye!")
-            break
-
-        # Write the user's input into memory.
-        slot = memory_module.write(user_input)
-        print(f"[Memory updated in slot {slot}]")
-
-        # Show the top 3 related memory entries.
-        topk_indices, topk_values, retrieved_entries = memory_module.read(
-            user_input, top_k=3)
-        print("\nTop memory entries related to your input:")
-        for i, entry in enumerate(retrieved_entries):
-            print(
-                f"  {i+1}. {entry} (similarity: {topk_values[i].item():.4f})")
-
-        # Build conversation history from the last 5 entries.
-        conversation_history = "\n".join(memory_module.entries[-5:])
-
-        # Special query handling.
-        if re.search(r"what(?:'s|s| is) my name\??", user_input.lower()):
+    
+    # Show the top 3 related memory entries
+    topk_indices, topk_values, retrieved_entries = memory_module.read(user_input, top_k=3)
+    
+    # Format memory entries for the frontend
+    memory_entries = []
+    for i, entry in enumerate(retrieved_entries):
+        if entry != "[Empty Slot]":
+            memory_entries.append({
+                'text': entry,
+                'similarity': topk_values[i].item()
+            })
+    
+    # Build conversation history from the last 5 entries
+    conversation_history = "\n".join(memory_module.entries[-5:])
+    
+    # Special query handling
+    if re.search(r"what(?:'s|s| is) my name\??", user_input.lower()):
+        if stored_name:
             bot_response = f"Your name is {stored_name}."
-        elif re.search(r"what(?:'s|s| is) your name\??", user_input.lower()):
-            bot_response = "Hi! My name is " + BOT_NAME + "!"
         else:
-            prompt = (f"Conversation so far:\n{conversation_history}\n"
-                      f"User's question: '{user_input}'\n"
-                      "Answer the question directly and concisely.")
-            bot_response = generate_response(prompt)
+            bot_response = "I don't know your name yet. What is your name?"
+    elif re.search(r"what(?:'s|s| is) your name\??", user_input.lower()):
+        bot_response = "Hi! My name is " + BOT_NAME + "!"
+    else:
+        prompt = (f"Conversation so far:\n{conversation_history}\n"
+                  f"User's question: '{user_input}'\n"
+                  "Answer the question directly and concisely.")
+        bot_response = generate_response(prompt)
+    
+    # Save memory
+    memory_module.save_memory()
+    
+    return jsonify({
+        'response': bot_response,
+        'memory_entries': memory_entries
+    })
 
-        print("\nBot:", bot_response)
-        memory_module.save_memory()
-
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
