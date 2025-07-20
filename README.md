@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # napoleon
 AI organizer for PC, laptop, and phone.
 =======
@@ -48,4 +48,3 @@ The web interface connects to a Flask backend that interfaces with the Napoleon 
 - Python 3.8 or higher
 - Ollama installed with the DeepSeek model available
 - Web browser with JavaScript enabled
->>>>>>> 4ac9c1e (Commiting all local files)
