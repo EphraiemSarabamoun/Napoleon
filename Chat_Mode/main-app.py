@@ -301,5 +301,9 @@ def chat():
         'memory_entries': memory_entries
     })
 
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
