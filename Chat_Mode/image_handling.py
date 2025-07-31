@@ -2,62 +2,125 @@ import cv2
 import easyocr
 import os
 import sys
+import subprocess
+import json
+import datetime
+import base64
+import requests
 
 # Fix encoding
 sys.stdout.reconfigure(encoding='utf-8')
 
-def webcam_test():
-    """Test webcam capture and text analysis"""
+def analyze_image_with_llava(image_path, model_name="llava:13b"):
+    """
+    Send image to LLaVA model via Ollama for analysis.
+    Returns the model's description of the image.
+    """
+    try:
+        # Read and encode image to base64
+        with open(image_path, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        # Prepare payload for Ollama
+        payload = {
+            "model": model_name,
+            "prompt": "Describe the content of this image in detail.",
+            "images": [encoded_image]
+        }
+        
+        # Call Ollama API
+        response = requests.post("http://localhost:11434/api/generate", json=payload)
+        response.raise_for_status()
+        
+        # Parse response (Ollama's generate API streams responses line by line)
+        description = ""
+        for line in response.iter_lines():
+            if line:
+                data = json.loads(line.decode('utf-8'))
+                if "response" in data:
+                    description += data["response"]
+                if data.get("done", False):
+                    break
+        
+        return description.strip() if description else "No description provided by LLaVA."
+    
+    except Exception as e:
+        print(f"Error analyzing image with LLaVA: {e}")
+        return f"Error analyzing image: {str(e)}"
+
+def webcam_capture_and_analyze(save_dir="output_frames"):
+    """
+    Capture image from webcam, extract text with EasyOCR, and analyze with LLaVA.
+    Returns a dictionary with extracted text and LLaVA description.
+    """
+    # Ensure save directory exists
+    os.makedirs(save_dir, exist_ok=True)
     
     # Initialize camera
     cap = cv2.VideoCapture(0)
     
     if not cap.isOpened():
-        print("Cannot open camera. Please check webcam connection.")
-        return
+        return {"error": "Cannot open camera. Please check webcam connection."}
     
-    print("Camera opened successfully!")
-    print("Taking picture in 3 seconds...")
+    try:
+        print("Camera opened successfully!")
+        print("Taking picture in 3 seconds...")
+        
+        import time
+        time.sleep(3)
+        
+        # Capture frame
+        ret, frame = cap.read()
+        
+        if not ret:
+            return {"error": "Failed to capture image"}
+        
+        # Save the captured image
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = f"webcam_capture_{timestamp}.jpg"
+        image_path = os.path.join(save_dir, filename)
+        cv2.imwrite(image_path, frame)
+        
+        print(f"Photo saved as: {image_path}")
+        
+        # Initialize EasyOCR
+        reader = easyocr.Reader(['en'], verbose=False)
+        
+        # Analyze the image for text
+        print("Analyzing image for text...")
+        results = reader.readtext(frame)
+        
+        # Format extracted text
+        extracted_text = ""
+        if results:
+            extracted_text = "\n".join([f"'{text}' (confidence: {confidence:.2f})" for _, text, confidence in results])
+        else:
+            extracted_text = "No text detected in the image."
+        
+        # Analyze image with LLaVA
+        print("Analyzing image with LLaVA...")
+        llava_description = analyze_image_with_llava(image_path)
+        
+        return {
+            "image_path": image_path,
+            "extracted_text": extracted_text,
+            "llava_description": llava_description
+        }
     
-    import time
-    time.sleep(3)
+    except Exception as e:
+        return {"error": f"Error: {str(e)}"}
     
-    # Capture frame
-    ret, frame = cap.read()
-    
-    if not ret:
-        print("Failed to capture image")
+    finally:
         cap.release()
-        return
-    
-    # Save the captured image to output_frames directory
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = f"output_frames/webcam_capture_{timestamp}.jpg"
-    cv2.imwrite(filename, frame)
-    cap.release()
-    
-    print(f"Photo saved as: {filename}")
-    
-    # Initialize EasyOCR
-    reader = easyocr.Reader(['en'], verbose=False)
-    
-    # Analyze the image
-    print("Analyzing image for text...")
-    results = reader.readtext(frame)
-    
-    if results:
-        print(f"Found {len(results)} text regions:")
-        for i, (bbox, text, confidence) in enumerate(results, 1):
-            print(f"  {i}. '{text}' (confidence: {confidence:.2f})")
-    else:
-        print("No text detected in the image")
-    
-    print("Test complete!")
 
 if __name__ == "__main__":
-    try:
-        webcam_test()
-    except Exception as e:
-        print(f"Error: {e}")
+    result = webcam_capture_and_analyze()
+    if "error" in result:
+        print(result["error"])
         print("Make sure webcam is enabled and accessible.")
+    else:
+        print("Analysis complete!")
+        print("Extracted Text:")
+        print(result["extracted_text"])
+        print("LLaVA Description:")
+        print(result["llava_description"])
