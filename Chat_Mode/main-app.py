@@ -40,6 +40,7 @@ def clean_response(response_text, show_thinking=True):
         cleaned = re.sub(r"Thinking\.\.\..*?done thinking\.", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
 
+
 def extract_user_name(text):
     """
     Searches the given text for a pattern like "my name is <name>" (case-insensitive)
@@ -196,12 +197,13 @@ class PersistentDeepSeekMemory(torch.nn.Module):
         self.entries = state["entries"]
 
 
-def generate_response(prompt):
+def generate_response(prompt, system_prompt=""):
     """
     Calls Ollama to run the specified model to generate a conversational response.
     The prompt instructs the model to answer directly and concisely.
     """
-    modified_prompt = (prompt +
+    full_prompt = system_prompt + prompt if system_prompt else prompt
+    modified_prompt = (full_prompt +
                        "\nAnswer directly and concisely. " +
                        "Do not provide a summary of the conversation; " +
                        "just answer the user's question.")
@@ -235,7 +237,7 @@ def generate_response(prompt):
         print(f"Error generating response for prompt '{prompt}': {e}")
         response = "[Error generating response]"
 
-    return clean_response(response)
+    return response
 
 
 # Initialize the memory module
@@ -248,6 +250,46 @@ memory_module = PersistentDeepSeekMemory(memory_file, memory_size, embedding_dim
 global stored_name
 stored_name = None
 
+# Personalities file
+personalities_file = "personalities.json"
+
+def load_personalities():
+    if os.path.exists(personalities_file):
+        with open(personalities_file, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_personalities(personalities):
+    with open(personalities_file, 'w') as f:
+        json.dump(personalities, f)
+
+@app.route('/api/personalities', methods=['GET'])
+def get_personalities():
+    return jsonify(load_personalities())
+
+@app.route('/api/personalities', methods=['POST'])
+def add_personality():
+    data = request.json
+    name = data.get('name')
+    prompt = data.get('prompt')
+    if not name or not prompt:
+        return jsonify({'error': 'Missing name or prompt'}), 400
+    personalities = load_personalities()
+    if any(p['name'] == name for p in personalities):
+        return jsonify({'error': 'Name exists'}), 400
+    personalities.append({'name': name, 'prompt': prompt})
+    save_personalities(personalities)
+    return jsonify({'success': True})
+
+@app.route('/api/personalities/<name>', methods=['DELETE'])
+def remove_personality(name):
+    personalities = load_personalities()
+    new_p = [p for p in personalities if p['name'] != name]
+    if len(new_p) == len(personalities):
+        return jsonify({'error': 'Not found'}), 404
+    save_personalities(new_p)
+    return jsonify({'success': True})
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global stored_name
@@ -255,6 +297,7 @@ def chat():
     data = request.json
     user_input = data.get('message', '')
     show_thinking = data.get('show_thinking', True)  # Get toggle state, default to True
+    selected_personality = data.get('personality', None)
     
     if not user_input:
         return jsonify({'error': 'No message provided'}), 400
@@ -282,6 +325,15 @@ def chat():
     # Build conversation history from the last 5 entries
     conversation_history = "\n".join(memory_module.entries[-5:])
     
+    # Load system prompt if personality selected
+    system_prompt = ""
+    if selected_personality:
+        personalities = load_personalities()
+        for p in personalities:
+            if p['name'] == selected_personality:
+                system_prompt = p['prompt'] + "\n"
+                break
+    
     # Special query handling
     if re.search(r"what(?:'s|s| is) my name\??", user_input.lower()):
         if stored_name:
@@ -294,7 +346,7 @@ def chat():
         prompt = (f"Conversation so far:\n{conversation_history}\n"
                   f"User's question: '{user_input}'\n"
                   "Answer the question directly and concisely.")
-        bot_response = generate_response(prompt)
+        bot_response = generate_response(prompt, system_prompt)
     
     # Clean response with the show_thinking parameter
     bot_response = clean_response(bot_response, show_thinking)
