@@ -149,7 +149,8 @@
             const loadingIndicator = document.getElementById('loading');
             const memoryEntriesContainer = document.getElementById('memory-entries');
             const toggleThinkingButton = document.getElementById('toggle-thinking-btn');
-            let isThinkingVisible = true;
+            let isThinkingVisible = true; // Start with thinking visible
+            toggleThinkingButton.textContent = 'Hide Thinking'; // Initial button text
             
             // Function to add a message to the chat
             function addMessage(text, isUser) {
@@ -196,7 +197,10 @@
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ message: message }),
+                        body: JSON.stringify({ 
+                            message: message,
+                            show_thinking: isThinkingVisible // Send toggle state
+                        }),
                     });
                     
                     if (!response.ok) {

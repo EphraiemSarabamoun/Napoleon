@@ -29,14 +29,16 @@ def simple_text_embedding(text, dim=256):
     return torch.tensor(v, dtype=torch.float)
 
 
-def clean_response(response_text):
+def clean_response(response_text, show_thinking=True):
     """
     Removes chain-of-thought text enclosed in <think>...</think> tags,
-    and strips extra whitespace.
+    and optionally removes thinking indicators. Strips extra whitespace.
     """
     cleaned = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL)
+    if not show_thinking:
+        # Remove "Thinking..." and "done thinking."
+        cleaned = re.sub(r"Thinking\.\.\..*?done thinking\.", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
-
 
 def extract_user_name(text):
     """
@@ -252,6 +254,7 @@ def chat():
     
     data = request.json
     user_input = data.get('message', '')
+    show_thinking = data.get('show_thinking', True)  # Get toggle state, default to True
     
     if not user_input:
         return jsonify({'error': 'No message provided'}), 400
@@ -292,6 +295,9 @@ def chat():
                   f"User's question: '{user_input}'\n"
                   "Answer the question directly and concisely.")
         bot_response = generate_response(prompt)
+    
+    # Clean response with the show_thinking parameter
+    bot_response = clean_response(bot_response, show_thinking)
     
     # Save memory
     memory_module.save_memory()
