@@ -86,6 +86,16 @@
             color: #343a40;
             align-self: flex-start;
         }
+        .image-message {
+            margin-bottom: 15px;
+            max-width: 80%;
+            align-self: flex-end;
+        }
+        .image-message img {
+            max-width: 100%;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
         .memory-item {
             padding: 10px;
             margin-bottom: 10px;
@@ -112,10 +122,10 @@
             font-style: italic;
             margin: 10px 0;
         }
-        #add-personality-form {
+        #personality-form {
             margin-top: 10px;
         }
-        #add-personality-form input, #add-personality-form textarea {
+        #personality-form input, #personality-form textarea {
             margin-bottom: 10px;
         }
     </style>
@@ -136,6 +146,7 @@
                 <div class="input-area">
                     <input type="text" id="user-input" class="form-control" placeholder="Type your message here...">
                     <button id="send-btn" class="btn btn-primary">Send</button>
+                    <button id="webcam-btn" class="btn btn-info">Capture Webcam</button>
                     <button id="toggle-thinking-btn" class="btn btn-secondary">Hide Thinking</button>
                 </div>
                 
@@ -176,6 +187,7 @@
             const messagesContainer = document.getElementById('messages');
             const userInput = document.getElementById('user-input');
             const sendButton = document.getElementById('send-btn');
+            const webcamButton = document.getElementById('webcam-btn');
             const loadingIndicator = document.getElementById('loading');
             const memoryEntriesContainer = document.getElementById('memory-entries');
             const toggleThinkingButton = document.getElementById('toggle-thinking-btn');
@@ -187,19 +199,35 @@
             const personalityNameInput = document.getElementById('personality-name');
             const personalityPromptInput = document.getElementById('personality-prompt');
             const savePersonalityButton = document.getElementById('save-personality-btn');
-            let isThinkingVisible = true; // Start with thinking visible
-            toggleThinkingButton.textContent = 'Hide Thinking'; // Initial button text
+            let isThinkingVisible = true;
+            toggleThinkingButton.textContent = 'Hide Thinking';
             let currentPersonality = '';
             let personalities = [];
             let editMode = false;
             let originalName = '';
 
-            // Function to add a message to the chat
+            // Function to add a text message to the chat
             function addMessage(text, isUser) {
                 const messageDiv = document.createElement('div');
                 messageDiv.classList.add('message');
                 messageDiv.classList.add(isUser ? 'user-message' : 'bot-message');
                 messageDiv.textContent = text;
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            // Function to add an image message to the chat
+            function addImageMessage(imagePath, text) {
+                const messageDiv = document.createElement('div');
+                messageDiv.classList.add('image-message');
+                const img = document.createElement('img');
+                img.src = imagePath;
+                img.alt = 'Webcam capture';
+                messageDiv.appendChild(img);
+                const textDiv = document.createElement('div');
+                textDiv.classList.add('message', 'user-message');
+                textDiv.textContent = text;
+                messageDiv.appendChild(textDiv);
                 messagesContainer.appendChild(messageDiv);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
@@ -247,13 +275,11 @@
             
             // Function to send a message to the backend
             async function sendMessage(message) {
-                // Show loading indicator if enabled
                 if (isThinkingVisible) {
                     loadingIndicator.style.display = 'block';
                 }
                 
                 try {
-                    // Make API call to the Flask backend
                     const response = await fetch('/api/chat', {
                         method: 'POST',
                         headers: {
@@ -261,7 +287,7 @@
                         },
                         body: JSON.stringify({ 
                             message: message,
-                            show_thinking: isThinkingVisible, // Send toggle state
+                            show_thinking: isThinkingVisible,
                             personality: currentPersonality || null
                         }),
                     });
@@ -272,17 +298,52 @@
                     
                     const data = await response.json();
                     
-                    // Add bot response to chat
                     addMessage(data.response, false);
-                    
-                    // Update memory entries
                     updateMemoryEntries(data.memory_entries || []);
                     
                 } catch (error) {
                     console.error('Error:', error);
                     addMessage("Sorry, there was an error processing your request. Make sure the Flask server is running.", false);
                 } finally {
-                    // Hide loading indicator
+                    loadingIndicator.style.display = 'none';
+                }
+            }
+
+            // Function to trigger webcam capture
+            async function triggerWebcamCapture() {
+                if (isThinkingVisible) {
+                    loadingIndicator.style.display = 'block';
+                }
+                
+                try {
+                    const response = await fetch('/api/webcam', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        addMessage(data.error, false);
+                        return;
+                    }
+                    
+                    // Display the image and analysis results
+                    addImageMessage(data.image_path, data.message);
+                    
+                    // Send the analysis results to the chat endpoint
+                    await sendMessage(data.message);
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    addMessage("Sorry, there was an error capturing or analyzing the webcam image. Make sure the webcam is enabled and the Flask server is running.", false);
+                } finally {
                     loadingIndicator.style.display = 'none';
                 }
             }
@@ -348,6 +409,11 @@
                     userInput.value = '';
                     sendMessage(message);
                 }
+            });
+            
+            // Event listener for webcam button
+            webcamButton.addEventListener('click', function() {
+                triggerWebcamCapture();
             });
             
             // Event listener for Enter key

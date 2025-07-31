@@ -7,6 +7,7 @@ import hashlib
 import numpy as np
 import re
 from flask import Flask, request, jsonify, send_from_directory
+from image_handling import webcam_capture_and_analyze
 
 # Global variable for the model name (you can change this as needed)
 MODEL_NAME = "deepseek-r1:32b"
@@ -27,7 +28,6 @@ def simple_text_embedding(text, dim=256):
         v = v[:dim]
     return torch.tensor(v, dtype=torch.float)
 
-
 def clean_response(response_text, show_thinking=True):
     """
     Removes chain-of-thought text enclosed in <think>...</think> tags,
@@ -35,10 +35,8 @@ def clean_response(response_text, show_thinking=True):
     """
     cleaned = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL)
     if not show_thinking:
-        # Remove "Thinking..." and "done thinking."
         cleaned = re.sub(r"Thinking\.\.\..*?done thinking\.", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
-
 
 def extract_user_name(text):
     """
@@ -51,7 +49,6 @@ def extract_user_name(text):
         return match.group(1)
     return None
 
-
 def get_user_name_from_entries(entries, bot_name=BOT_NAME):
     """
     Scans the entries in reverse order and returns the most recent extracted name
@@ -62,7 +59,6 @@ def get_user_name_from_entries(entries, bot_name=BOT_NAME):
         if name and name.lower() != bot_name.lower():
             return name
     return None
-
 
 class PersistentDeepSeekMemory(torch.nn.Module):
     def __init__(self, memory_file, memory_size=10, embedding_dim=256):
@@ -104,9 +100,8 @@ class PersistentDeepSeekMemory(torch.nn.Module):
             )
             output_text = result.stdout.strip()
             if not output_text:
-                print(
-                    f"No output received from {MODEL_NAME} for text: '{text}'")
-                response_text = text  # fallback to input text
+                print(f"No output received from {MODEL_NAME} for text: '{text}'")
+                response_text = text
             else:
                 try:
                     output_json = json.loads(output_text)
@@ -116,9 +111,7 @@ class PersistentDeepSeekMemory(torch.nn.Module):
                             if len(embedding_list) > self.embedding_dim:
                                 embedding_list = embedding_list[:self.embedding_dim]
                             else:
-                                embedding_list = embedding_list + \
-                                    [0.0] * (self.embedding_dim -
-                                             len(embedding_list))
+                                embedding_list = embedding_list + [0.0] * (self.embedding_dim - len(embedding_list))
                         return torch.tensor(embedding_list, dtype=torch.float)
                     elif "response" in output_json:
                         response_text = output_json["response"]
@@ -126,17 +119,14 @@ class PersistentDeepSeekMemory(torch.nn.Module):
                         response_text = output_text
                 except json.JSONDecodeError:
                     response_text = output_text
-            embedding_tensor = simple_text_embedding(
-                response_text, self.embedding_dim)
+            embedding_tensor = simple_text_embedding(response_text, self.embedding_dim)
         except subprocess.CalledProcessError as cpe:
             print(f"Error obtaining embedding for '{text}': {cpe}")
             print("stderr:", cpe.stderr)
-            embedding_tensor = torch.zeros(
-                self.embedding_dim, dtype=torch.float)
+            embedding_tensor = torch.zeros(self.embedding_dim, dtype=torch.float)
         except Exception as e:
             print(f"Error obtaining embedding for '{text}': {e}")
-            embedding_tensor = torch.zeros(
-                self.embedding_dim, dtype=torch.float)
+            embedding_tensor = torch.zeros(self.embedding_dim, dtype=torch.float)
         return embedding_tensor
 
     def write(self, text):
@@ -145,7 +135,7 @@ class PersistentDeepSeekMemory(torch.nn.Module):
         Chooses the memory slot with the lowest usage.
         """
         embedding = self.embed_text(text)
-        usage_scores = -self.usage  # lower usage gives higher score
+        usage_scores = -self.usage
         probabilities = F.softmax(usage_scores, dim=0)
         slot_index = torch.argmax(probabilities).item()
         self.memory[slot_index] = embedding
@@ -181,8 +171,7 @@ class PersistentDeepSeekMemory(torch.nn.Module):
         """
         Saves the current memory state to disk.
         """
-        state = {"memory": self.memory,
-                 "usage": self.usage, "entries": self.entries}
+        state = {"memory": self.memory, "usage": self.usage, "entries": self.entries}
         torch.save(state, self.memory_file)
         print(f"Memory saved to {self.memory_file}")
 
@@ -194,7 +183,6 @@ class PersistentDeepSeekMemory(torch.nn.Module):
         self.memory.copy_(state["memory"])
         self.usage.copy_(state["usage"])
         self.entries = state["entries"]
-
 
 def generate_response(prompt, system_prompt=""):
     """
@@ -218,8 +206,7 @@ def generate_response(prompt, system_prompt=""):
         )
         output_text = result.stdout.strip()
         if not output_text:
-            print(
-                f"No output received from {MODEL_NAME} for prompt: '{prompt}'")
+            print(f"No output received from {MODEL_NAME} for prompt: '{prompt}'")
             return "[No response generated]"
         try:
             output_json = json.loads(output_text)
@@ -237,7 +224,6 @@ def generate_response(prompt, system_prompt=""):
         response = "[Error generating response]"
 
     return response
-
 
 # Initialize the memory module
 memory_file = "memories/dnc_memory.pt"
@@ -307,13 +293,32 @@ def remove_personality(name):
     save_personalities(new_p)
     return jsonify({'success': True})
 
+@app.route('/api/webcam', methods=['POST'])
+def webcam():
+    """
+    Trigger webcam capture, analyze with EasyOCR and LLaVA, and return results.
+    """
+    result = webcam_capture_and_analyze()
+    if "error" in result:
+        return jsonify({'error': result["error"]}), 500
+    
+    # Combine extracted text and LLaVA description into a message
+    message = (
+        f"A description of the user's image:{result['llava_description']}\n Comment on this image."
+    )
+    
+    return jsonify({
+        'message': message,
+        'image_path': f"/output_frames/{os.path.basename(result['image_path'])}"
+    })
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     global stored_name
     
     data = request.json
     user_input = data.get('message', '')
-    show_thinking = data.get('show_thinking', True)  # Get toggle state, default to True
+    show_thinking = data.get('show_thinking', True)
     selected_personality = data.get('personality', None)
     
     if not user_input:
@@ -361,8 +366,8 @@ def chat():
         bot_response = "Hi! My name is " + BOT_NAME + "!"
     else:
         prompt = (f"Conversation so far:\n{conversation_history}\n"
-                  f"User's question: '{user_input}'\n"
-                  "Answer the question directly and concisely.")
+                  f"User's input: '{user_input}'\n"
+                  "Answer the input directly and concisely.")
         bot_response = generate_response(prompt, system_prompt)
     
     # Clean response with the show_thinking parameter
@@ -376,9 +381,15 @@ def chat():
         'memory_entries': memory_entries
     })
 
+@app.route('/output_frames/<path:filename>')
+def serve_image(filename):
+    return send_from_directory('output_frames', filename)
+
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
 
 if __name__ == '__main__':
+    os.makedirs('output_frames', exist_ok=True)
+    os.makedirs('memories', exist_ok=True)
     app.run(debug=True, host='0.0.0.0', port=5000)
