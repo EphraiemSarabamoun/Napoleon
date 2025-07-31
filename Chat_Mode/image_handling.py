@@ -83,27 +83,12 @@ def webcam_capture_and_analyze(save_dir="output_frames"):
         
         print(f"Photo saved as: {image_path}")
         
-        # Initialize EasyOCR
-        reader = easyocr.Reader(['en'], verbose=False)
-        
-        # Analyze the image for text
-        print("Analyzing image for text...")
-        results = reader.readtext(frame)
-        
-        # Format extracted text
-        extracted_text = ""
-        if results:
-            extracted_text = "\n".join([f"'{text}' (confidence: {confidence:.2f})" for _, text, confidence in results])
-        else:
-            extracted_text = "No text detected in the image."
-        
         # Analyze image with LLaVA
         print("Analyzing image with LLaVA...")
         llava_description = analyze_image_with_llava(image_path)
         
         return {
             "image_path": image_path,
-            "extracted_text": extracted_text,
             "llava_description": llava_description
         }
     
