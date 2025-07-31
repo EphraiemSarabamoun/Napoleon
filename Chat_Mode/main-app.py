@@ -1,4 +1,3 @@
-
 import os
 import json
 import subprocess
@@ -280,6 +279,24 @@ def add_personality():
     personalities.append({'name': name, 'prompt': prompt})
     save_personalities(personalities)
     return jsonify({'success': True})
+
+@app.route('/api/personalities/<name>', methods=['PUT'])
+def update_personality(name):
+    data = request.json
+    new_name = data.get('name')
+    prompt = data.get('prompt')
+    if not new_name or not prompt:
+        return jsonify({'error': 'Missing name or prompt'}), 400
+    personalities = load_personalities()
+    for p in personalities:
+        if p['name'] == name:
+            if new_name != name and any(pp['name'] == new_name for pp in personalities):
+                return jsonify({'error': 'New name exists'}), 400
+            p['name'] = new_name
+            p['prompt'] = prompt
+            save_personalities(personalities)
+            return jsonify({'success': True})
+    return jsonify({'error': 'Not found'}), 404
 
 @app.route('/api/personalities/<name>', methods=['DELETE'])
 def remove_personality(name):

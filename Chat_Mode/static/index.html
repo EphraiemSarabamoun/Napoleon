@@ -160,10 +160,11 @@
                     <option value="">None</option>
                 </select>
                 <button id="add-personality-btn" class="btn btn-success mb-2">Add Personality</button>
+                <button id="edit-personality-btn" class="btn btn-warning mb-2">Edit Selected</button>
                 <button id="remove-personality-btn" class="btn btn-danger mb-2">Remove Selected</button>
-                <div id="add-personality-form" style="display: none;">
-                    <input type="text" id="new-name" class="form-control" placeholder="Personality Name">
-                    <textarea id="new-prompt" class="form-control" placeholder="System Prompt"></textarea>
+                <div id="personality-form" style="display: none;">
+                    <input type="text" id="personality-name" class="form-control" placeholder="Personality Name">
+                    <textarea id="personality-prompt" class="form-control" placeholder="System Prompt"></textarea>
                     <button id="save-personality-btn" class="btn btn-primary mt-2">Save</button>
                 </div>
             </div>
@@ -180,14 +181,18 @@
             const toggleThinkingButton = document.getElementById('toggle-thinking-btn');
             const personalitySelect = document.getElementById('personality-select');
             const addPersonalityButton = document.getElementById('add-personality-btn');
+            const editPersonalityButton = document.getElementById('edit-personality-btn');
             const removePersonalityButton = document.getElementById('remove-personality-btn');
-            const addPersonalityForm = document.getElementById('add-personality-form');
-            const newNameInput = document.getElementById('new-name');
-            const newPromptInput = document.getElementById('new-prompt');
+            const personalityForm = document.getElementById('personality-form');
+            const personalityNameInput = document.getElementById('personality-name');
+            const personalityPromptInput = document.getElementById('personality-prompt');
             const savePersonalityButton = document.getElementById('save-personality-btn');
             let isThinkingVisible = true; // Start with thinking visible
             toggleThinkingButton.textContent = 'Hide Thinking'; // Initial button text
             let currentPersonality = '';
+            let personalities = [];
+            let editMode = false;
+            let originalName = '';
 
             // Function to add a message to the chat
             function addMessage(text, isUser) {
@@ -224,7 +229,7 @@
             async function updatePersonalities() {
                 try {
                     const response = await fetch('/api/personalities');
-                    const personalities = await response.json();
+                    personalities = await response.json();
                     personalitySelect.innerHTML = '<option value="">None</option>';
                     personalities.forEach(p => {
                         const option = document.createElement('option');
@@ -282,11 +287,13 @@
                 }
             }
 
-            // Function to add a new personality
-            async function addPersonality(name, prompt) {
+            // Function to add or update a personality
+            async function savePersonality(name, prompt) {
+                const method = editMode ? 'PUT' : 'POST';
+                const url = editMode ? `/api/personalities/${encodeURIComponent(originalName)}` : '/api/personalities';
                 try {
-                    const response = await fetch('/api/personalities', {
-                        method: 'POST',
+                    const response = await fetch(url, {
+                        method: method,
                         headers: {
                             'Content-Type': 'application/json',
                         },
@@ -294,16 +301,20 @@
                     });
                     if (!response.ok) {
                         const data = await response.json();
-                        alert(data.error || 'Error adding personality');
+                        alert(data.error || 'Error saving personality');
                         return;
                     }
+                    if (editMode && name !== originalName) {
+                        currentPersonality = name;
+                    }
                     updatePersonalities();
-                    addPersonalityForm.style.display = 'none';
-                    newNameInput.value = '';
-                    newPromptInput.value = '';
+                    personalityForm.style.display = 'none';
+                    personalityNameInput.value = '';
+                    personalityPromptInput.value = '';
+                    editMode = false;
                 } catch (error) {
-                    console.error('Error adding personality:', error);
-                    alert('Error adding personality');
+                    console.error('Error saving personality:', error);
+                    alert('Error saving personality');
                 }
             }
 
@@ -364,15 +375,36 @@
 
             // Event listener for add personality button
             addPersonalityButton.addEventListener('click', function() {
-                addPersonalityForm.style.display = addPersonalityForm.style.display === 'none' ? 'block' : 'none';
+                editMode = false;
+                personalityNameInput.value = '';
+                personalityPromptInput.value = '';
+                savePersonalityButton.textContent = 'Save';
+                personalityForm.style.display = 'block';
+            });
+
+            // Event listener for edit personality button
+            editPersonalityButton.addEventListener('click', function() {
+                if (currentPersonality) {
+                    const selected = personalities.find(p => p.name === currentPersonality);
+                    if (selected) {
+                        editMode = true;
+                        originalName = currentPersonality;
+                        personalityNameInput.value = selected.name;
+                        personalityPromptInput.value = selected.prompt;
+                        savePersonalityButton.textContent = 'Update';
+                        personalityForm.style.display = 'block';
+                    }
+                } else {
+                    alert('Please select a personality to edit');
+                }
             });
 
             // Event listener for save personality button
             savePersonalityButton.addEventListener('click', function() {
-                const name = newNameInput.value.trim();
-                const prompt = newPromptInput.value.trim();
+                const name = personalityNameInput.value.trim();
+                const prompt = personalityPromptInput.value.trim();
                 if (name && prompt) {
-                    addPersonality(name, prompt);
+                    savePersonality(name, prompt);
                 } else {
                     alert('Please enter both name and prompt');
                 }
