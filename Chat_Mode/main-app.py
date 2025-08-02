@@ -33,8 +33,9 @@ def clean_response(response_text, show_thinking=True):
     Removes chain-of-thought text enclosed in <think>...</think> tags,
     and optionally removes thinking indicators. Strips extra whitespace.
     """
-    cleaned = re.sub(r"<think>.*?</think>", "", response_text, flags=re.DOTALL)
+    cleaned = response_text
     if not show_thinking:
+        cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
         cleaned = re.sub(r"Thinking\.\.\..*?done thinking\.", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
 
